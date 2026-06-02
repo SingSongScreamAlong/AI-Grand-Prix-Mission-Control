@@ -224,11 +224,21 @@ function App() {
         </div>
         <div className="metric-grid executive-grid">
           <MetricCard label="Project Health" value={executiveSummary.projectHealth} />
+          <MetricCard label="Organizational Health" value={executiveSummary.organizationalHealth} />
+          <MetricCard label="Confidence Level" value={executiveSummary.confidenceLevel} />
           <MetricCard label="Current Bottleneck" value={executiveSummary.currentBottleneck} />
           <MetricCard label="Team Consensus" value={executiveSummary.teamConsensus} />
           <MetricCard label="Recommended Action" value={executiveSummary.recommendedAction} />
         </div>
+        <section className="learning-panel">
+          <h3>Organizational Learning</h3>
+          <p>{executiveSummary.organizationalLearning}</p>
+        </section>
         <div className="executive-columns">
+          <section>
+            <h3>Top Blockers</h3>
+            <ExecutiveList items={executiveSummary.topBlockers} />
+          </section>
           <section>
             <h3>Top Risks</h3>
             <ExecutiveList items={executiveSummary.topRisks} />
@@ -236,6 +246,28 @@ function App() {
           <section>
             <h3>Pending Decisions</h3>
             <ExecutiveList items={executiveSummary.pendingDecisions} />
+          </section>
+          <section>
+            <h3>Remediation Queue</h3>
+            {executiveSummary.remediationQueue?.length ? (
+              <ul>
+                {executiveSummary.remediationQueue.map((task) => <li key={task.id}>{task.title}</li>)}
+              </ul>
+            ) : (
+              <p>No remediation tasks pending.</p>
+            )}
+          </section>
+          <section>
+            <h3>Git Change Findings</h3>
+            {executiveSummary.gitFindings?.length ? (
+              <ul>
+                {executiveSummary.gitFindings.map((finding) => (
+                  <li key={finding.id}>{finding.agent}: {Object.entries(finding.summary).map(([label, count]) => `${label} ${count}`).join(', ')}</li>
+                ))}
+              </ul>
+            ) : (
+              <p>No git findings reported.</p>
+            )}
           </section>
         </div>
       </section>

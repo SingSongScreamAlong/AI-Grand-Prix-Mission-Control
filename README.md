@@ -130,6 +130,103 @@ Autonomy levels:
 
 If `OPENAI_API_KEY` is configured, Mission Control uses the LLM helper. If it is not configured, it uses a deterministic local fallback so the command bar still works.
 
+### Adaptive organization endpoints
+
+Mission Control now tracks organizational learning so failed cycles can become blockers and remediation work instead of repeated scheduler loops.
+
+#### POST `/api/adaptive-task-update`
+
+Records task outcomes from an agent runner or autonomous loop.
+
+```json
+{
+  "agent": "Testing Team",
+  "task": "Investigate gate 1 failure",
+  "outcome": "failed",
+  "note": "Same failure reproduced",
+  "rootCause": "Gate detector threshold is unstable",
+  "linkedDirectiveId": "optional-directive-id",
+  "linkedFindingId": "optional-finding-id"
+}
+```
+
+Repeated failures are converted into:
+
+- Failure memory
+- Open blockers
+- Remediation tasks
+- Suppressed repeated task recommendations
+
+#### GET `/api/adaptive-next-task`
+
+Returns the next adaptive organization task, prioritizing remediation and blockers over repeating known failed work.
+
+#### POST `/api/git-findings`
+
+Classifies dirty repository changes from agent workstations.
+
+```json
+{
+  "agent": "Integration Team",
+  "changes": [
+    { "path": "src/main.jsx", "status": "modified" },
+    { "path": "data/logs.json", "status": "modified" }
+  ],
+  "note": "Post-cycle repository scan"
+}
+```
+
+Classifications:
+
+- Source changes
+- Generated files
+- Logs
+- Reports
+- Unknown files
+
+#### GET endpoints
+
+```text
+GET /api/failures
+GET /api/blockers
+GET /api/remediation-tasks
+GET /api/git-findings
+```
+
+### Autonomy roadmap
+
+Current state:
+
+- Level 0: manual directives only.
+- Level 1: Team Principal prompt-to-directive generation.
+
+Level 2 design:
+
+- Agent runner reports task outcomes to `/api/adaptive-task-update`.
+- Repeated failed tasks are suppressed.
+- Mission Control generates blockers and remediation tasks.
+- `/api/adaptive-next-task` becomes the runner's next-task source.
+
+Level 3 design:
+
+- Agents propose remediation plans and implementation diffs.
+- Mission Control classifies git changes and summarizes risk.
+- Team Principal approves or rejects recommended fixes before merge/deploy.
+
+Level 4 design:
+
+- Mission Control autonomously sequences remediation, validation, and rollout.
+- Human approval is reserved for high-risk changes, critical blockers, and deployment.
+- Organizational health and confidence thresholds gate autonomous action.
+
+Recommended implementation order:
+
+1. Wire Agent Runner cycle reporting into `/api/adaptive-task-update`.
+2. Wire next-cycle selection to `/api/adaptive-next-task`.
+3. Add workstation git scan reporting to `/api/git-findings`.
+4. Add Team Principal approval controls for remediation tasks.
+5. Add deployment gates based on organizational health and confidence.
+
 ### POST `/api/agent-update`
 
 Updates one agent and appends an entry to `data/logs.json`.
@@ -345,6 +442,10 @@ The app stores state in:
 - `data/acknowledgements.json`
 - `data/findings.json`
 - `data/recommendations.json`
+- `data/failures.json`
+- `data/blockers.json`
+- `data/remediation-tasks.json`
+- `data/git-findings.json`
 
 Every `POST /api/agent-update` writes to `agents.json`, recalculates basic project health in `status.json`, and appends to `logs.json`.
 

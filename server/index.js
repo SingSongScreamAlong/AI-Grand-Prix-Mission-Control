@@ -17,7 +17,11 @@ const files = {
   directives: path.join(dataDir, 'directives.json'),
   acknowledgements: path.join(dataDir, 'acknowledgements.json'),
   findings: path.join(dataDir, 'findings.json'),
-  recommendations: path.join(dataDir, 'recommendations.json')
+  recommendations: path.join(dataDir, 'recommendations.json'),
+  failures: path.join(dataDir, 'failures.json'),
+  blockers: path.join(dataDir, 'blockers.json'),
+  remediationTasks: path.join(dataDir, 'remediation-tasks.json'),
+  gitFindings: path.join(dataDir, 'git-findings.json')
 };
 
 const validStatuses = ['idle', 'working', 'testing', 'blocked', 'done'];
@@ -70,6 +74,10 @@ function createDirectiveId() {
 
 function createReportId(type) {
   return `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeTaskKey(agent, task) {
+  return `${agent || 'unknown'}::${task || 'unknown'}`.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 function clampText(value, fallback, maxLength) {
@@ -248,6 +256,45 @@ function summarizeTopRisks(agents, findings) {
   return [...findingRisks, ...agentRisks].slice(0, 5);
 }
 
+function summarizeTopBlockers(blockers) {
+  return newestFirst(blockers)
+    .filter((blocker) => blocker.status === 'open')
+    .slice(0, 5)
+    .map((blocker) => `${blocker.agent}: ${blocker.title}`);
+}
+
+function calculateOrganizationalHealth(agents, blockers, failures) {
+  const openBlockers = blockers.filter((blocker) => blocker.status === 'open').length;
+  const repeatedFailures = failures.filter((failure) => failure.failureCount >= 2).length;
+  const blockedAgents = agents.filter((agent) => agent.status === 'blocked').length;
+
+  if (openBlockers >= 3 || repeatedFailures >= 3 || blockedAgents >= 2) {
+    return 'red';
+  }
+
+  if (openBlockers > 0 || repeatedFailures > 0 || blockedAgents > 0) {
+    return 'yellow';
+  }
+
+  return 'green';
+}
+
+function calculateConfidenceLevel(blockers, failures, recommendations) {
+  const openBlockers = blockers.filter((blocker) => blocker.status === 'open').length;
+  const repeatedFailures = failures.filter((failure) => failure.failureCount >= 2).length;
+  const pendingRecommendations = recommendations.filter((recommendation) => recommendation.status === 'pending').length;
+
+  if (openBlockers > 2 || repeatedFailures > 2) {
+    return 'low';
+  }
+
+  if (openBlockers > 0 || repeatedFailures > 0 || pendingRecommendations > 0) {
+    return 'medium';
+  }
+
+  return 'high';
+}
+
 function summarizePendingDecisions(directives, recommendations) {
   const activeDirectives = directives
     .filter((directive) => directive.status === 'active')
@@ -257,6 +304,63 @@ function summarizePendingDecisions(directives, recommendations) {
     .map((recommendation) => `Recommendation pending: ${recommendation.recommendation}`);
 
   return [...activeDirectives, ...pendingRecommendations].slice(0, 5);
+}
+
+function buildRemediationTask(failure, reason) {
+  const title = reason === 'blocked'
+    ? `Unblock ${failure.agent}: ${failure.task}`
+    : `Remediate repeated failure: ${failure.task}`;
+
+  return {
+    id: createReportId('remediation'),
+    timestamp: nowIso(),
+    agent: failure.agent,
+    sourceFailureKey: failure.taskKey,
+    title,
+    type: reason === 'missing-dependency' ? 'dependency-resolution' : reason === 'blocked' ? 'unblock' : 'fix',
+    priority: failure.failureCount >= 3 ? 'critical' : 'high',
+    status: 'pending',
+    rationale: failure.rootCause || failure.lastNote || 'Task has failed repeatedly and requires a different approach.'
+  };
+}
+
+function buildBlocker(failure) {
+  return {
+    id: createReportId('blocker'),
+    timestamp: nowIso(),
+    agent: failure.agent,
+    title: `Repeated failure: ${failure.task}`,
+    description: failure.rootCause || failure.lastNote || 'Task failed repeatedly without successful resolution.',
+    severity: failure.failureCount >= 3 ? 'critical' : 'high',
+    status: 'open',
+    linkedFailureKey: failure.taskKey,
+    linkedFindingIds: [],
+    linkedDirectiveIds: []
+  };
+}
+
+function classifyGitPath(filePath) {
+  if (filePath.startsWith('data/') || filePath.endsWith('.log')) {
+    return 'logs';
+  }
+  if (filePath.startsWith('dist/') || filePath.includes('/dist/') || filePath.endsWith('.generated')) {
+    return 'generated files';
+  }
+  if (filePath.endsWith('.md') || filePath.includes('REPORT') || filePath.includes('report')) {
+    return 'reports';
+  }
+  if (filePath.match(/\.(js|jsx|ts|tsx|css|html|json|ps1)$/)) {
+    return 'source changes';
+  }
+  return 'unknown files';
+}
+
+function classifyGitChanges(changes) {
+  return changes.map((change) => ({
+    path: change.path,
+    status: change.status || 'modified',
+    classification: classifyGitPath(change.path)
+  }));
 }
 
 function summarizeStatus(agents, currentStatus) {
@@ -298,26 +402,223 @@ app.get('/api/logs', async (req, res) => {
   res.json(logs.slice(-100).reverse());
 });
 
+app.get('/api/failures', async (req, res) => {
+  const failures = await readJson(files.failures, []);
+  res.json(newestFirst(failures));
+});
+
+app.get('/api/blockers', async (req, res) => {
+  const blockers = await readJson(files.blockers, []);
+  res.json(newestFirst(blockers));
+});
+
+app.get('/api/remediation-tasks', async (req, res) => {
+  const remediationTasks = await readJson(files.remediationTasks, []);
+  res.json(newestFirst(remediationTasks));
+});
+
+app.get('/api/git-findings', async (req, res) => {
+  const gitFindings = await readJson(files.gitFindings, []);
+  res.json(newestFirst(gitFindings));
+});
+
+app.post('/api/adaptive-task-update', async (req, res) => {
+  const { agent, task, outcome, note, rootCause, linkedDirectiveId, linkedFindingId } = req.body;
+
+  if (!agent || !task || !outcome) {
+    return res.status(400).json({ error: 'agent, task, and outcome are required' });
+  }
+
+  const timestamp = nowIso();
+  const taskKey = normalizeTaskKey(agent, task);
+  const failures = await readJson(files.failures, []);
+  const blockers = await readJson(files.blockers, []);
+  const remediationTasks = await readJson(files.remediationTasks, []);
+  const logs = await readJson(files.logs, []);
+  const existingFailure = failures.find((failure) => failure.taskKey === taskKey);
+  const failed = ['failed', 'blocked', 'missing-dependency'].includes(outcome);
+  const generated = {
+    blocker: null,
+    remediationTask: null,
+    suppressed: false
+  };
+
+  if (failed) {
+    const failure = existingFailure || {
+      id: createReportId('failure'),
+      taskKey,
+      agent,
+      task,
+      firstSeen: timestamp,
+      failureCount: 0,
+      rootCause: '',
+      status: 'active',
+      linkedDirectiveIds: [],
+      linkedFindingIds: []
+    };
+
+    failure.failureCount += 1;
+    failure.lastSeen = timestamp;
+    failure.lastOutcome = outcome;
+    failure.lastNote = note || '';
+    failure.rootCause = rootCause || failure.rootCause || '';
+
+    if (linkedDirectiveId && !failure.linkedDirectiveIds.includes(linkedDirectiveId)) {
+      failure.linkedDirectiveIds.push(linkedDirectiveId);
+    }
+
+    if (linkedFindingId && !failure.linkedFindingIds.includes(linkedFindingId)) {
+      failure.linkedFindingIds.push(linkedFindingId);
+    }
+
+    if (!existingFailure) {
+      failures.push(failure);
+    }
+
+    if (failure.failureCount >= 2) {
+      generated.suppressed = true;
+      const existingBlocker = blockers.find((blocker) => blocker.linkedFailureKey === taskKey && blocker.status === 'open');
+
+      if (!existingBlocker) {
+        generated.blocker = buildBlocker(failure);
+        generated.blocker.linkedDirectiveIds = [...failure.linkedDirectiveIds];
+        generated.blocker.linkedFindingIds = [...failure.linkedFindingIds];
+        blockers.push(generated.blocker);
+      }
+
+      const existingRemediation = remediationTasks.find((remediationTask) => remediationTask.sourceFailureKey === taskKey && remediationTask.status === 'pending');
+
+      if (!existingRemediation) {
+        generated.remediationTask = buildRemediationTask(failure, outcome);
+        remediationTasks.push(generated.remediationTask);
+      }
+    }
+  } else if (existingFailure) {
+    existingFailure.status = 'resolved';
+    existingFailure.resolvedAt = timestamp;
+  }
+
+  const logEntry = {
+    type: 'adaptive-task-update',
+    timestamp,
+    agent,
+    task,
+    outcome,
+    note: note || '',
+    rootCause: rootCause || '',
+    generated
+  };
+
+  logs.push(logEntry);
+
+  await writeJson(files.failures, failures);
+  await writeJson(files.blockers, blockers);
+  await writeJson(files.remediationTasks, remediationTasks);
+  await writeJson(files.logs, logs);
+
+  res.json({ ok: true, generated, failures: newestFirst(failures), blockers: newestFirst(blockers), remediationTasks: newestFirst(remediationTasks) });
+});
+
+app.get('/api/adaptive-next-task', async (req, res) => {
+  const [failures, blockers, remediationTasks, recommendations] = await Promise.all([
+    readJson(files.failures, []),
+    readJson(files.blockers, []),
+    readJson(files.remediationTasks, []),
+    readJson(files.recommendations, [])
+  ]);
+  const pendingRemediation = newestFirst(remediationTasks).find((task) => task.status === 'pending');
+  const openBlocker = newestFirst(blockers).find((blocker) => blocker.status === 'open');
+  const pendingRecommendation = newestFirst(recommendations).find((recommendation) => recommendation.status === 'pending');
+  const suppressedTasks = failures
+    .filter((failure) => failure.failureCount >= 2 && failure.status !== 'resolved')
+    .map((failure) => failure.task);
+
+  if (pendingRemediation) {
+    return res.json({ nextTask: pendingRemediation, reason: 'remediation', suppressedTasks });
+  }
+
+  if (openBlocker) {
+    return res.json({ nextTask: openBlocker, reason: 'blocker', suppressedTasks });
+  }
+
+  if (pendingRecommendation) {
+    return res.json({ nextTask: pendingRecommendation, reason: 'recommendation', suppressedTasks });
+  }
+
+  res.json({ nextTask: null, reason: 'no adaptive task available', suppressedTasks });
+});
+
+app.post('/api/git-findings', async (req, res) => {
+  const { agent, changes, note } = req.body;
+
+  if (!Array.isArray(changes)) {
+    return res.status(400).json({ error: 'changes must be an array' });
+  }
+
+  const timestamp = nowIso();
+  const classifiedChanges = classifyGitChanges(changes);
+  const finding = {
+    id: createReportId('git-finding'),
+    timestamp,
+    agent: agent || 'Unknown',
+    note: note || '',
+    changes: classifiedChanges,
+    summary: classifiedChanges.reduce((counts, change) => {
+      counts[change.classification] = (counts[change.classification] || 0) + 1;
+      return counts;
+    }, {})
+  };
+  const gitFindings = await readJson(files.gitFindings, []);
+  const logs = await readJson(files.logs, []);
+
+  gitFindings.push(finding);
+  logs.push({
+    type: 'git-findings-created',
+    timestamp,
+    finding
+  });
+
+  await writeJson(files.gitFindings, gitFindings);
+  await writeJson(files.logs, logs);
+
+  res.status(201).json({ ok: true, finding });
+});
+
 app.get('/api/executive-summary', async (req, res) => {
-  const [status, agents, directives, acknowledgements, findings, recommendations] = await Promise.all([
+  const [status, agents, directives, acknowledgements, findings, recommendations, failures, blockers, remediationTasks, gitFindings] = await Promise.all([
     readJson(files.status, {}),
     readJson(files.agents, []),
     readJson(files.directives, []),
     readJson(files.acknowledgements, []),
     readJson(files.findings, []),
-    readJson(files.recommendations, [])
+    readJson(files.recommendations, []),
+    readJson(files.failures, []),
+    readJson(files.blockers, []),
+    readJson(files.remediationTasks, []),
+    readJson(files.gitFindings, [])
   ]);
   const topRisks = summarizeTopRisks(agents, findings);
+  const topBlockers = summarizeTopBlockers(blockers);
   const pendingDecisions = summarizePendingDecisions(directives, recommendations);
-  const latestRecommendation = newestFirst(recommendations)[0];
+  const latestRemediation = newestFirst(remediationTasks).find((task) => task.status === 'pending');
+  const latestRecommendation = latestRemediation || newestFirst(recommendations)[0];
+  const repeatedFailures = failures.filter((failure) => failure.failureCount >= 2);
 
   res.json({
     projectHealth: status.projectHealth ?? status.overallProjectHealth ?? 'unknown',
+    organizationalHealth: calculateOrganizationalHealth(agents, blockers, failures),
+    confidenceLevel: calculateConfidenceLevel(blockers, failures, recommendations),
     currentBottleneck: findCurrentBottleneck(agents, status),
     teamConsensus: summarizeConsensus(agents, acknowledgements, recommendations),
     topRisks: topRisks.length ? topRisks : ['No top risks reported.'],
-    recommendedAction: latestRecommendation?.recommendation || 'Maintain current execution plan and wait for agent recommendations.',
+    topBlockers: topBlockers.length ? topBlockers : ['No open blockers reported.'],
+    recommendedAction: latestRecommendation?.title || latestRecommendation?.recommendation || 'Maintain current execution plan and wait for agent recommendations.',
     pendingDecisions: pendingDecisions.length ? pendingDecisions : ['No pending decisions reported.'],
+    organizationalLearning: repeatedFailures.length
+      ? `${repeatedFailures.length} repeated failure pattern(s) detected and converted into blockers/remediation.`
+      : 'No repeated failure patterns detected.',
+    remediationQueue: newestFirst(remediationTasks).filter((task) => task.status === 'pending').slice(0, 5),
+    gitFindings: newestFirst(gitFindings).slice(0, 5),
     timestamp: nowIso()
   });
 });
