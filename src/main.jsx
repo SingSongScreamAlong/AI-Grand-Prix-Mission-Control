@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
-const apiBase = import.meta.env.VITE_API_BASE || `${window.location.protocol}//${window.location.hostname}:3001`;
+const apiBase = import.meta.env.VITE_API_BASE || '';
 
 function formatTime(value) {
   if (!value || value === 'Never') return 'Never';

@@ -8,6 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 const dataDir = path.join(rootDir, 'data');
+const distDir = path.join(rootDir, 'dist');
 
 const files = {
   status: path.join(dataDir, 'status.json'),
@@ -33,9 +34,11 @@ const allowedStatusUpdateFields = [
 
 const app = express();
 const port = process.env.PORT || 3001;
+const host = process.env.HOST || '0.0.0.0';
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static(distDir));
 
 async function readJson(filePath, fallback) {
   try {
@@ -185,6 +188,14 @@ app.post('/api/status-update', async (req, res) => {
   res.json({ ok: true, status: nextStatus, log: logEntry });
 });
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(`AI Grand Prix Mission Control API running on http://0.0.0.0:${port}`);
+app.use((req, res, next) => {
+  if (req.method === 'GET' && !req.path.startsWith('/api')) {
+    return res.sendFile(path.join(distDir, 'index.html'));
+  }
+
+  return next();
+});
+
+app.listen(port, host, () => {
+  console.log(`AI Grand Prix Mission Control running on http://${host}:${port}`);
 });
