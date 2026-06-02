@@ -403,19 +403,29 @@ function normalizeAdaptiveTaskPayload(body) {
 
 function normalizeGitFindingsPayload(body) {
   const agent = firstPresent(body.agent, body.agentName, 'Unknown');
-  const rawChanges = firstPresent(body.changes, body.changedFiles, body.classifications);
-  const note = firstPresent(body.note, body.evidence, body.evidenceExcerpt, body.summary, '');
+  const rawChanges = firstPresent(
+    body.changes,
+    body.changedFiles,
+    body.classifications,
+    body.files,
+    body.dirtyFiles,
+    body.repositoryChanges,
+    body.gitChanges
+  );
+  const note = firstPresent(body.note, body.evidence, body.evidenceExcerpt, body.summary, body.finding, body.impact, '');
   const changes = Array.isArray(rawChanges)
     ? rawChanges
     : rawChanges && typeof rawChanges === 'object'
       ? Object.entries(rawChanges).map(([filePath, classification]) => ({ path: filePath, classification }))
+      : body.finding
+        ? [{ path: 'repository', classification: 'reports', finding: body.finding, impact: body.impact, severity: body.severity }]
       : null;
 
   return {
     agent,
     changes,
     note,
-    recommendation: firstPresent(body.recommendation, body.recommendedNextAction, '')
+    recommendation: firstPresent(body.recommendation, body.recommendedNextAction, body.impact, '')
   };
 }
 
@@ -609,7 +619,7 @@ app.post('/api/git-findings', async (req, res) => {
   const { agent, changes, note, recommendation } = normalizeGitFindingsPayload(req.body);
 
   if (!Array.isArray(changes)) {
-    return validationError(res, ['changes|changedFiles|classifications'], req.body);
+    return validationError(res, ['changes|changedFiles|classifications|files|dirtyFiles|repositoryChanges|gitChanges|finding'], req.body);
   }
 
   const timestamp = nowIso();

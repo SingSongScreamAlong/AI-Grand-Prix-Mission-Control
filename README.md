@@ -201,7 +201,7 @@ Classifies dirty repository changes from agent workstations.
 Accepted field aliases:
 
 - Agent: `agent` or `agentName`
-- Changes: `changes`, `changedFiles`, or `classifications`
+- Changes: `changes`, `changedFiles`, `classifications`, `files`, `dirtyFiles`, `repositoryChanges`, `gitChanges`, or fallback `finding`
 - Change path: string entries, or object fields `path`, `file`, `filePath`, or `name`
 - Change classification: `classification`, `type`, or `category`
 - Evidence: `note`, `evidence`, or `evidenceExcerpt`
@@ -229,6 +229,17 @@ Autonomous-loop compatible examples:
     "src/main.jsx": "source changes",
     "data/logs.json": "logs"
   }
+}
+```
+
+Fallback-compatible example:
+
+```json
+{
+  "agent": "Integration Team",
+  "finding": "Repository dirty after autonomous loop",
+  "impact": "Source changes require Team Principal review",
+  "severity": "medium"
 }
 ```
 
