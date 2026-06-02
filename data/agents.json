@@ -1,0 +1,58 @@
+[
+  {
+    "name": "Perception Team",
+    "status": "working",
+    "currentTask": "Testing gate detection",
+    "latestNote": "False positives reduced in latest run",
+    "lastUpdateTime": "2026-06-02T02:07:25.034Z",
+    "risk": "medium"
+  },
+  {
+    "name": "Navigation Team",
+    "status": "idle",
+    "currentTask": "Waiting for assignment",
+    "latestNote": "No updates yet",
+    "lastUpdateTime": "Never",
+    "risk": "low"
+  },
+  {
+    "name": "Controls Team",
+    "status": "idle",
+    "currentTask": "Waiting for assignment",
+    "latestNote": "No updates yet",
+    "lastUpdateTime": "Never",
+    "risk": "low"
+  },
+  {
+    "name": "Testing Team",
+    "status": "testing",
+    "currentTask": "Morning audit endpoint verification",
+    "latestNote": "POST endpoint verified during startup audit",
+    "lastUpdateTime": "2026-06-02T11:24:37.678Z",
+    "risk": "low"
+  },
+  {
+    "name": "Integration Team",
+    "status": "idle",
+    "currentTask": "Waiting for assignment",
+    "latestNote": "No updates yet",
+    "lastUpdateTime": "Never",
+    "risk": "low"
+  },
+  {
+    "name": "Technical Director",
+    "status": "idle",
+    "currentTask": "Waiting for assignment",
+    "latestNote": "No updates yet",
+    "lastUpdateTime": "Never",
+    "risk": "low"
+  },
+  {
+    "name": "Team Principal",
+    "status": "idle",
+    "currentTask": "Waiting for assignment",
+    "latestNote": "No updates yet",
+    "lastUpdateTime": "Never",
+    "risk": "low"
+  }
+]
