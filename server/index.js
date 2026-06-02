@@ -13,11 +13,18 @@ const distDir = path.join(rootDir, 'dist');
 const files = {
   status: path.join(dataDir, 'status.json'),
   agents: path.join(dataDir, 'agents.json'),
-  logs: path.join(dataDir, 'logs.json')
+  logs: path.join(dataDir, 'logs.json'),
+  directives: path.join(dataDir, 'directives.json'),
+  acknowledgements: path.join(dataDir, 'acknowledgements.json'),
+  findings: path.join(dataDir, 'findings.json'),
+  recommendations: path.join(dataDir, 'recommendations.json')
 };
 
 const validStatuses = ['idle', 'working', 'testing', 'blocked', 'done'];
 const validRisks = ['low', 'medium', 'high'];
+const validDirectivePriorities = ['low', 'medium', 'high', 'critical'];
+const validDirectiveScopes = ['all', 'controls', 'perception', 'testing', 'qa', 'navigation', 'integration'];
+const validDirectiveStatuses = ['active', 'acknowledged', 'completed', 'cancelled'];
 const allowedStatusUpdateFields = [
   'projectHealth',
   'buildStatus',
@@ -57,6 +64,75 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function createDirectiveId() {
+  return `directive-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createReportId(type) {
+  return `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function newestFirst(items) {
+  return [...items].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+}
+
+function findCurrentBottleneck(agents, status) {
+  const blockedAgent = agents.find((agent) => agent.status === 'blocked');
+  if (blockedAgent) {
+    return `${blockedAgent.name}: ${blockedAgent.currentTask}`;
+  }
+
+  const highRiskAgent = agents.find((agent) => agent.risk === 'high');
+  if (highRiskAgent) {
+    return `${highRiskAgent.name}: ${highRiskAgent.currentTask}`;
+  }
+
+  if (status.currentBlockers?.length) {
+    return status.currentBlockers[0];
+  }
+
+  return 'No active bottleneck reported.';
+}
+
+function summarizeConsensus(agents, acknowledgements, recommendations) {
+  const activeAgents = agents.filter((agent) => ['working', 'testing'].includes(agent.status)).length;
+  const latestRecommendation = newestFirst(recommendations)[0];
+  const latestAcknowledgements = newestFirst(acknowledgements).slice(0, 3);
+
+  if (latestRecommendation) {
+    return `Latest recommendation from ${latestRecommendation.agent}: ${latestRecommendation.recommendation}`;
+  }
+
+  if (latestAcknowledgements.length > 0) {
+    return `${latestAcknowledgements.length} recent acknowledgement(s); ${activeAgents} agent(s) actively working or testing.`;
+  }
+
+  return `${activeAgents} agent(s) actively working or testing. Awaiting consensus reports.`;
+}
+
+function summarizeTopRisks(agents, findings) {
+  const agentRisks = agents
+    .filter((agent) => ['high', 'medium'].includes(agent.risk))
+    .map((agent) => `${agent.name}: ${agent.risk} risk`);
+  const findingRisks = newestFirst(findings)
+    .filter((finding) => ['high', 'critical'].includes(finding.severity))
+    .slice(0, 3)
+    .map((finding) => `${finding.agent}: ${finding.finding}`);
+
+  return [...findingRisks, ...agentRisks].slice(0, 5);
+}
+
+function summarizePendingDecisions(directives, recommendations) {
+  const activeDirectives = directives
+    .filter((directive) => directive.status === 'active')
+    .map((directive) => `Directive pending: ${directive.title}`);
+  const pendingRecommendations = recommendations
+    .filter((recommendation) => recommendation.status === 'pending')
+    .map((recommendation) => `Recommendation pending: ${recommendation.recommendation}`);
+
+  return [...activeDirectives, ...pendingRecommendations].slice(0, 5);
+}
+
 function summarizeStatus(agents, currentStatus) {
   const blockedAgents = agents.filter((agent) => agent.status === 'blocked');
   const highRiskAgents = agents.filter((agent) => agent.risk === 'high');
@@ -94,6 +170,250 @@ app.get('/api/agents', async (req, res) => {
 app.get('/api/logs', async (req, res) => {
   const logs = await readJson(files.logs, []);
   res.json(logs.slice(-100).reverse());
+});
+
+app.get('/api/executive-summary', async (req, res) => {
+  const [status, agents, directives, acknowledgements, findings, recommendations] = await Promise.all([
+    readJson(files.status, {}),
+    readJson(files.agents, []),
+    readJson(files.directives, []),
+    readJson(files.acknowledgements, []),
+    readJson(files.findings, []),
+    readJson(files.recommendations, [])
+  ]);
+  const topRisks = summarizeTopRisks(agents, findings);
+  const pendingDecisions = summarizePendingDecisions(directives, recommendations);
+  const latestRecommendation = newestFirst(recommendations)[0];
+
+  res.json({
+    projectHealth: status.projectHealth ?? status.overallProjectHealth ?? 'unknown',
+    currentBottleneck: findCurrentBottleneck(agents, status),
+    teamConsensus: summarizeConsensus(agents, acknowledgements, recommendations),
+    topRisks: topRisks.length ? topRisks : ['No top risks reported.'],
+    recommendedAction: latestRecommendation?.recommendation || 'Maintain current execution plan and wait for agent recommendations.',
+    pendingDecisions: pendingDecisions.length ? pendingDecisions : ['No pending decisions reported.'],
+    timestamp: nowIso()
+  });
+});
+
+app.get('/api/directives', async (req, res) => {
+  const directives = await readJson(files.directives, []);
+  res.json([...directives].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
+});
+
+app.get('/api/directives/current', async (req, res) => {
+  const directives = await readJson(files.directives, []);
+  const activeDirectives = directives
+    .filter((directive) => directive.status === 'active')
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  res.json(activeDirectives[0] || null);
+});
+
+app.post('/api/directive', async (req, res) => {
+  const { priority, scope, title, objective, instructions, successCriteria } = req.body;
+
+  if (!priority || !scope || !title || !objective || !instructions || !successCriteria) {
+    return res.status(400).json({
+      error: 'priority, scope, title, objective, instructions, and successCriteria are required'
+    });
+  }
+
+  if (!validDirectivePriorities.includes(priority)) {
+    return res.status(400).json({ error: `priority must be one of: ${validDirectivePriorities.join(', ')}` });
+  }
+
+  if (!validDirectiveScopes.includes(scope)) {
+    return res.status(400).json({ error: `scope must be one of: ${validDirectiveScopes.join(', ')}` });
+  }
+
+  const timestamp = nowIso();
+  const directive = {
+    id: createDirectiveId(),
+    timestamp,
+    issuedBy: 'Team Principal',
+    priority,
+    scope,
+    title,
+    objective,
+    instructions,
+    successCriteria,
+    status: 'active'
+  };
+  const directives = await readJson(files.directives, []);
+  const logs = await readJson(files.logs, []);
+  const logEntry = {
+    type: 'directive-created',
+    timestamp,
+    directive
+  };
+
+  directives.push(directive);
+  logs.push(logEntry);
+
+  await writeJson(files.directives, directives);
+  await writeJson(files.logs, logs);
+
+  res.status(201).json({ ok: true, directive, log: logEntry });
+});
+
+app.patch('/api/directive/:id', async (req, res) => {
+  const { status } = req.body;
+
+  if (!status) {
+    return res.status(400).json({ error: 'status is required' });
+  }
+
+  if (!validDirectiveStatuses.includes(status)) {
+    return res.status(400).json({ error: `status must be one of: ${validDirectiveStatuses.join(', ')}` });
+  }
+
+  const timestamp = nowIso();
+  const directives = await readJson(files.directives, []);
+  const directive = directives.find((item) => item.id === req.params.id);
+
+  if (!directive) {
+    return res.status(404).json({ error: `Unknown directive: ${req.params.id}` });
+  }
+
+  const previousStatus = directive.status;
+  directive.status = status;
+  directive.updatedAt = timestamp;
+
+  const logs = await readJson(files.logs, []);
+  const logEntry = {
+    type: 'directive-updated',
+    timestamp,
+    directiveId: directive.id,
+    previousStatus,
+    status
+  };
+
+  logs.push(logEntry);
+
+  await writeJson(files.directives, directives);
+  await writeJson(files.logs, logs);
+
+  res.json({ ok: true, directive, log: logEntry });
+});
+
+app.get('/api/acknowledgements', async (req, res) => {
+  const acknowledgements = await readJson(files.acknowledgements, []);
+  res.json(newestFirst(acknowledgements));
+});
+
+app.post('/api/acknowledgement', async (req, res) => {
+  const { directiveId, agent, note } = req.body;
+
+  if (!directiveId || !agent) {
+    return res.status(400).json({ error: 'directiveId and agent are required' });
+  }
+
+  const timestamp = nowIso();
+  const acknowledgement = {
+    id: createReportId('acknowledgement'),
+    timestamp,
+    directiveId,
+    agent,
+    note: note || '',
+    status: 'acknowledged'
+  };
+  const acknowledgements = await readJson(files.acknowledgements, []);
+  const logs = await readJson(files.logs, []);
+  const logEntry = {
+    type: 'directive-acknowledged',
+    timestamp,
+    acknowledgement
+  };
+
+  acknowledgements.push(acknowledgement);
+  logs.push(logEntry);
+
+  await writeJson(files.acknowledgements, acknowledgements);
+  await writeJson(files.logs, logs);
+
+  res.status(201).json({ ok: true, acknowledgement, log: logEntry });
+});
+
+app.get('/api/findings', async (req, res) => {
+  const findings = await readJson(files.findings, []);
+  res.json(newestFirst(findings));
+});
+
+app.post('/api/finding', async (req, res) => {
+  const { agent, finding, impact, severity } = req.body;
+
+  if (!agent || !finding || !impact || !severity) {
+    return res.status(400).json({ error: 'agent, finding, impact, and severity are required' });
+  }
+
+  if (!validDirectivePriorities.includes(severity)) {
+    return res.status(400).json({ error: `severity must be one of: ${validDirectivePriorities.join(', ')}` });
+  }
+
+  const timestamp = nowIso();
+  const findingEntry = {
+    id: createReportId('finding'),
+    timestamp,
+    agent,
+    finding,
+    impact,
+    severity
+  };
+  const findings = await readJson(files.findings, []);
+  const logs = await readJson(files.logs, []);
+  const logEntry = {
+    type: 'finding-created',
+    timestamp,
+    finding: findingEntry
+  };
+
+  findings.push(findingEntry);
+  logs.push(logEntry);
+
+  await writeJson(files.findings, findings);
+  await writeJson(files.logs, logs);
+
+  res.status(201).json({ ok: true, finding: findingEntry, log: logEntry });
+});
+
+app.get('/api/recommendations', async (req, res) => {
+  const recommendations = await readJson(files.recommendations, []);
+  res.json(newestFirst(recommendations));
+});
+
+app.post('/api/recommendation', async (req, res) => {
+  const { agent, recommendation, rationale, decisionNeeded } = req.body;
+
+  if (!agent || !recommendation || !rationale) {
+    return res.status(400).json({ error: 'agent, recommendation, and rationale are required' });
+  }
+
+  const timestamp = nowIso();
+  const recommendationEntry = {
+    id: createReportId('recommendation'),
+    timestamp,
+    agent,
+    recommendation,
+    rationale,
+    decisionNeeded: decisionNeeded || '',
+    status: decisionNeeded ? 'pending' : 'informational'
+  };
+  const recommendations = await readJson(files.recommendations, []);
+  const logs = await readJson(files.logs, []);
+  const logEntry = {
+    type: 'recommendation-created',
+    timestamp,
+    recommendation: recommendationEntry
+  };
+
+  recommendations.push(recommendationEntry);
+  logs.push(logEntry);
+
+  await writeJson(files.recommendations, recommendations);
+  await writeJson(files.logs, logs);
+
+  res.status(201).json({ ok: true, recommendation: recommendationEntry, log: logEntry });
 });
 
 app.post('/api/agent-update', async (req, res) => {

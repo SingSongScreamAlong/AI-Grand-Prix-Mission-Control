@@ -61,13 +61,14 @@ h2 {
 
 .subtitle {
   color: #a8b6cc;
-  max-width: 680px;
+  max-width: 760px;
 }
 
 .refresh-panel,
 .metric-card,
 .agent-card,
 .overview-panel,
+.team-orders-panel,
 .logs-panel {
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(15, 23, 42, 0.78);
@@ -93,6 +94,7 @@ h2 {
 }
 
 .overview-panel,
+.team-orders-panel,
 .logs-panel {
   border-radius: 24px;
   margin-bottom: 28px;
@@ -112,6 +114,10 @@ h2 {
   gap: 14px;
 }
 
+.executive-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .metric-card {
   border-radius: 18px;
   padding: 16px;
@@ -125,20 +131,22 @@ h2 {
 }
 
 .metric-value {
-  font-size: 1.35rem;
+  font-size: 1.1rem;
   font-weight: 800;
   overflow-wrap: anywhere;
 }
 
-.blockers-panel {
+.executive-columns {
   border-top: 1px solid rgba(148, 163, 184, 0.14);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
   margin-top: 18px;
   padding-top: 18px;
 }
 
-.blockers-panel p,
-.blockers-panel li,
-.blockers-panel span {
+.executive-columns li,
+.executive-columns p {
   color: #a8b6cc;
 }
 
@@ -200,6 +208,8 @@ h2 {
 .health-green,
 .status-done,
 .status-idle,
+.status-acknowledged,
+.status-completed,
 .risk-low {
   background: rgba(34, 197, 94, 0.14);
   color: #86efac;
@@ -208,6 +218,7 @@ h2 {
 .health-yellow,
 .status-working,
 .status-testing,
+.status-active,
 .risk-medium {
   background: rgba(250, 204, 21, 0.14);
   color: #fde047;
@@ -215,9 +226,84 @@ h2 {
 
 .health-red,
 .status-blocked,
+.status-cancelled,
 .risk-high {
   background: rgba(239, 68, 68, 0.16);
   color: #fca5a5;
+}
+
+.directive-low,
+.directive-none {
+  background: rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
+}
+
+.directive-medium,
+.directive-high {
+  background: rgba(250, 204, 21, 0.14);
+  color: #fde047;
+}
+
+.directive-critical {
+  background: rgba(239, 68, 68, 0.16);
+  color: #fca5a5;
+}
+
+.directive-card {
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 18px;
+  margin-bottom: 18px;
+  padding: 16px;
+}
+
+.directive-meta {
+  color: #93a4bb;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.directive-form {
+  display: grid;
+  gap: 10px;
+}
+
+.directive-form input,
+.directive-form select,
+.directive-form textarea {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #e5eefc;
+  font: inherit;
+  padding: 10px 12px;
+}
+
+.directive-form textarea {
+  min-height: 82px;
+  resize: vertical;
+}
+
+.directive-form button {
+  border: 0;
+  border-radius: 12px;
+  background: #5eead4;
+  color: #042f2e;
+  cursor: pointer;
+  font-weight: 900;
+  padding: 11px 14px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.form-message,
+.muted-text {
+  color: #a8b6cc;
 }
 
 .log-list {
@@ -259,6 +345,8 @@ h2 {
 
 @media (max-width: 1000px) {
   .metric-grid,
+  .executive-grid,
+  .executive-columns,
   .agent-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -275,7 +363,10 @@ h2 {
   }
 
   .metric-grid,
-  .agent-grid {
+  .executive-grid,
+  .executive-columns,
+  .agent-grid,
+  .form-row {
     grid-template-columns: 1fr;
   }
 

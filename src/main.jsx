@@ -21,6 +21,10 @@ function RiskBadge({ value }) {
   return <span className={`badge risk-${value}`}>{value}</span>;
 }
 
+function DirectiveBadge({ value }) {
+  return <span className={`badge directive-${value}`}>{value}</span>;
+}
+
 function MetricCard({ label, value }) {
   return (
     <section className="metric-card">
@@ -30,8 +34,14 @@ function MetricCard({ label, value }) {
   );
 }
 
-function statusValue(status, primaryKey, fallbackKey) {
-  return status[primaryKey] ?? status[fallbackKey] ?? '--';
+function ExecutiveList({ items }) {
+  return items?.length ? (
+    <ul>
+      {items.map((item) => <li key={item}>{item}</li>)}
+    </ul>
+  ) : (
+    <p>No items reported.</p>
+  );
 }
 
 function AgentCard({ agent }) {
@@ -58,31 +68,82 @@ function AgentCard({ agent }) {
 }
 
 function App() {
-  const [status, setStatus] = useState(null);
+  const [executiveSummary, setExecutiveSummary] = useState(null);
   const [agents, setAgents] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [currentDirective, setCurrentDirective] = useState(null);
+  const [directiveForm, setDirectiveForm] = useState({
+    title: '',
+    priority: 'medium',
+    scope: 'all',
+    objective: '',
+    instructions: '',
+    successCriteria: ''
+  });
   const [error, setError] = useState('');
+  const [directiveMessage, setDirectiveMessage] = useState('');
   const [lastRefresh, setLastRefresh] = useState(null);
 
   async function loadData() {
     try {
-      const [statusResponse, agentsResponse, logsResponse] = await Promise.all([
-        fetch(`${apiBase}/api/status`),
+      const [summaryResponse, agentsResponse, logsResponse, directiveResponse] = await Promise.all([
+        fetch(`${apiBase}/api/executive-summary`),
         fetch(`${apiBase}/api/agents`),
-        fetch(`${apiBase}/api/logs`)
+        fetch(`${apiBase}/api/logs`),
+        fetch(`${apiBase}/api/directives/current`)
       ]);
 
-      if (!statusResponse.ok || !agentsResponse.ok || !logsResponse.ok) {
+      if (!summaryResponse.ok || !agentsResponse.ok || !logsResponse.ok || !directiveResponse.ok) {
         throw new Error('API request failed');
       }
 
-      setStatus(await statusResponse.json());
+      setExecutiveSummary(await summaryResponse.json());
       setAgents(await agentsResponse.json());
       setLogs(await logsResponse.json());
+      setCurrentDirective(await directiveResponse.json());
       setError('');
       setLastRefresh(new Date());
     } catch (loadError) {
-      setError(`Unable to reach API at ${apiBase}`);
+      setError(`Unable to reach API at ${apiBase || 'same origin'}`);
+    }
+  }
+
+  function updateDirectiveForm(field, value) {
+    setDirectiveForm((current) => ({
+      ...current,
+      [field]: value
+    }));
+  }
+
+  async function submitDirective(event) {
+    event.preventDefault();
+    setDirectiveMessage('');
+
+    try {
+      const response = await fetch(`${apiBase}/api/directive`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(directiveForm)
+      });
+
+      if (!response.ok) {
+        throw new Error('Directive request failed');
+      }
+
+      setDirectiveForm({
+        title: '',
+        priority: 'medium',
+        scope: 'all',
+        objective: '',
+        instructions: '',
+        successCriteria: ''
+      });
+      setDirectiveMessage('Directive issued.');
+      await loadData();
+    } catch (submitError) {
+      setDirectiveMessage('Unable to issue directive.');
     }
   }
 
@@ -92,11 +153,11 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  if (!status) {
+  if (!executiveSummary) {
     return (
       <main className="app-shell">
         <h1>AI Grand Prix Mission Control</h1>
-        <p>Loading dashboard...</p>
+        <p>Loading executive command system...</p>
         {error && <p className="error-box">{error}</p>}
       </main>
     );
@@ -106,9 +167,9 @@ function App() {
     <main className="app-shell">
       <header className="top-bar">
         <div>
-          <p className="eyebrow">Local Oversight Dashboard</p>
-          <h1>AI Grand Prix Mission Control</h1>
-          <p className="subtitle">Mac command center for PC-based AI engineering agents.</p>
+          <p className="eyebrow">Executive Command System</p>
+          <h1>Mission Control</h1>
+          <p className="subtitle">Team Principal dashboard for directives, decisions, risks, and recommended action.</p>
         </div>
         <div className="refresh-panel">
           <span>Auto refresh: 5s</span>
@@ -118,32 +179,107 @@ function App() {
 
       {error && <p className="error-box">{error}</p>}
 
-      <section className="overview-panel">
+      <section className="overview-panel executive-panel">
         <div className="overview-header">
-          <h2>Main Dashboard</h2>
-          <HealthBadge value={status.projectHealth ?? status.overallProjectHealth} />
+          <h2>Executive Summary</h2>
+          <HealthBadge value={executiveSummary.projectHealth} />
         </div>
-        <div className="metric-grid">
-          <MetricCard label="Latest build" value={statusValue(status, 'buildStatus', 'latestBuildStatus')} />
-          <MetricCard label="Latest tests" value={statusValue(status, 'testStatus', 'latestTestStatus')} />
-          <MetricCard label="Best lap" value={status.bestLapTime} />
-          <MetricCard label="Average lap" value={status.averageLapTime} />
-          <MetricCard label="Crash rate" value={status.crashRate} />
-          <MetricCard label="Completion" value={status.completionRate} />
-          <MetricCard label="Active branch" value={status.activeBranch} />
-          <MetricCard label="Last commit" value={status.lastCommit} />
+        <div className="metric-grid executive-grid">
+          <MetricCard label="Project Health" value={executiveSummary.projectHealth} />
+          <MetricCard label="Current Bottleneck" value={executiveSummary.currentBottleneck} />
+          <MetricCard label="Team Consensus" value={executiveSummary.teamConsensus} />
+          <MetricCard label="Recommended Action" value={executiveSummary.recommendedAction} />
         </div>
-        <div className="blockers-panel">
-          <h3>Current blockers</h3>
-          {status.currentBlockers?.length ? (
-            <ul>
-              {status.currentBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}
-            </ul>
-          ) : (
-            <p>No blockers reported.</p>
-          )}
-          <span>Last update: {formatTime(status.lastUpdate ?? status.timestampOfLastUpdate)}</span>
+        <div className="executive-columns">
+          <section>
+            <h3>Top Risks</h3>
+            <ExecutiveList items={executiveSummary.topRisks} />
+          </section>
+          <section>
+            <h3>Pending Decisions</h3>
+            <ExecutiveList items={executiveSummary.pendingDecisions} />
+          </section>
         </div>
+      </section>
+
+      <section className="team-orders-panel">
+        <div className="overview-header">
+          <h2>Team Orders</h2>
+          {currentDirective ? <DirectiveBadge value={currentDirective.priority} /> : <DirectiveBadge value="none" />}
+        </div>
+        {currentDirective ? (
+          <div className="directive-card">
+            <div className="directive-meta">
+              <span>ID: {currentDirective.id}</span>
+              <span>Scope: {currentDirective.scope}</span>
+              <span>Issued by: {currentDirective.issuedBy}</span>
+              <span>{formatTime(currentDirective.timestamp)}</span>
+              <StatusBadge value={currentDirective.status} />
+            </div>
+            <h3>{currentDirective.title}</h3>
+            <div className="agent-field">
+              <strong>Objective</strong>
+              <p>{currentDirective.objective}</p>
+            </div>
+            <div className="agent-field">
+              <strong>Success criteria</strong>
+              <p>{currentDirective.successCriteria}</p>
+            </div>
+          </div>
+        ) : (
+          <p className="muted-text">No active directive.</p>
+        )}
+        <form className="directive-form" onSubmit={submitDirective}>
+          <input
+            value={directiveForm.title}
+            onChange={(event) => updateDirectiveForm('title', event.target.value)}
+            placeholder="Directive title"
+            required
+          />
+          <div className="form-row">
+            <select
+              value={directiveForm.priority}
+              onChange={(event) => updateDirectiveForm('priority', event.target.value)}
+            >
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+              <option value="critical">critical</option>
+            </select>
+            <select
+              value={directiveForm.scope}
+              onChange={(event) => updateDirectiveForm('scope', event.target.value)}
+            >
+              <option value="all">all</option>
+              <option value="controls">controls</option>
+              <option value="perception">perception</option>
+              <option value="testing">testing</option>
+              <option value="qa">qa</option>
+              <option value="navigation">navigation</option>
+              <option value="integration">integration</option>
+            </select>
+          </div>
+          <textarea
+            value={directiveForm.objective}
+            onChange={(event) => updateDirectiveForm('objective', event.target.value)}
+            placeholder="Objective"
+            required
+          />
+          <textarea
+            value={directiveForm.instructions}
+            onChange={(event) => updateDirectiveForm('instructions', event.target.value)}
+            placeholder="Instructions"
+            required
+          />
+          <textarea
+            value={directiveForm.successCriteria}
+            onChange={(event) => updateDirectiveForm('successCriteria', event.target.value)}
+            placeholder="Success criteria"
+            required
+          />
+          <button type="submit">Issue Directive</button>
+          {directiveMessage && <span className="form-message">{directiveMessage}</span>}
+        </form>
       </section>
 
       <section>
@@ -160,13 +296,13 @@ function App() {
             {logs.map((log, index) => (
               <article className="log-row" key={`${log.timestamp}-${index}`}>
                 <div>
-                  <strong>{log.agent}</strong>
-                  <p>{log.task}</p>
-                  <span>{log.note}</span>
+                  <strong>{log.agent || log.type || 'System'}</strong>
+                  <p>{log.task || log.directive?.title || log.recommendation?.recommendation || log.finding?.finding || log.status}</p>
+                  <span>{log.note || log.directive?.objective || log.recommendation?.rationale || log.finding?.impact || ''}</span>
                 </div>
                 <div className="log-meta">
-                  <StatusBadge value={log.status} />
-                  <RiskBadge value={log.risk} />
+                  {log.status && <StatusBadge value={log.status} />}
+                  {log.risk && <RiskBadge value={log.risk} />}
                   <small>{formatTime(log.timestamp)}</small>
                 </div>
               </article>

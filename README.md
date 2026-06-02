@@ -83,6 +83,33 @@ Returns all agent cards.
 
 Returns recent update logs.
 
+### GET `/api/executive-summary`
+
+Returns the Team Principal home-page summary:
+
+- Project Health
+- Current Bottleneck
+- Team Consensus
+- Top Risks
+- Recommended Action
+- Pending Decisions
+
+### GET `/api/directives`
+
+Returns all directives, newest first.
+
+### GET `/api/directives/current`
+
+Returns the most recent active directive.
+
+### POST `/api/directive`
+
+Creates a Team Principal directive.
+
+### PATCH `/api/directive/:id`
+
+Updates directive status.
+
 ### POST `/api/agent-update`
 
 Updates one agent and appends an entry to `data/logs.json`.
@@ -265,6 +292,28 @@ Basic example:
 .\update-status.ps1 -Server "http://192.168.1.50:3001" -BuildStatus "passing" -TestStatus "running" -BestLapTime "8.42" -CompletionRate "91%" -CrashRate "4%" -ActiveBranch "main"
 ```
 
+## Windows directive workflow
+
+PC engineering terminals should pull orders from Mission Control instead of relying on raw terminal output.
+
+Fetch the current active order:
+
+```powershell
+.\get-directives.ps1 -Server "http://157.245.132.229:3001"
+```
+
+Acknowledge an order:
+
+```powershell
+.\acknowledge-directive.ps1 -Server "http://157.245.132.229:3001" -DirectiveId "DIRECTIVE_ID"
+```
+
+Report completion with the existing reporting script:
+
+```powershell
+.\report-agent.ps1 -Server "http://157.245.132.229:3001" -Agent "Integration Team" -Status "done" -Task "Completed directive DIRECTIVE_ID" -Note "Success criteria met and ready for Team Principal review" -Risk "low"
+```
+
 ## Data files
 
 The app stores state in:
@@ -272,6 +321,10 @@ The app stores state in:
 - `data/status.json`
 - `data/agents.json`
 - `data/logs.json`
+- `data/directives.json`
+- `data/acknowledgements.json`
+- `data/findings.json`
+- `data/recommendations.json`
 
 Every `POST /api/agent-update` writes to `agents.json`, recalculates basic project health in `status.json`, and appends to `logs.json`.
 
