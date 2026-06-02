@@ -150,6 +150,28 @@ Records task outcomes from an agent runner or autonomous loop.
 }
 ```
 
+Accepted field aliases:
+
+- Agent: `agent` or `agentName`
+- Task: `task`, `taskKey`, or `taskName`
+- Outcome: `outcome`, `classification`, `result`, or `status`
+- Evidence: `note`, `evidence`, or `evidenceExcerpt`
+- Recommendation: `recommendation` or `recommendedNextAction`
+- Optional links: `linkedDirectiveId`, `linkedFindingId`
+
+Autonomous-loop compatible example:
+
+```json
+{
+  "agentName": "Testing Team",
+  "taskName": "Investigate gate 1 failure",
+  "classification": "failed",
+  "rootCause": "Gate detector threshold is unstable",
+  "evidenceExcerpt": "Same failure reproduced twice",
+  "recommendedNextAction": "Create threshold calibration remediation task"
+}
+```
+
 Repeated failures are converted into:
 
 - Failure memory
@@ -173,6 +195,40 @@ Classifies dirty repository changes from agent workstations.
     { "path": "data/logs.json", "status": "modified" }
   ],
   "note": "Post-cycle repository scan"
+}
+```
+
+Accepted field aliases:
+
+- Agent: `agent` or `agentName`
+- Changes: `changes`, `changedFiles`, or `classifications`
+- Change path: string entries, or object fields `path`, `file`, `filePath`, or `name`
+- Change classification: `classification`, `type`, or `category`
+- Evidence: `note`, `evidence`, or `evidenceExcerpt`
+- Recommendation: `recommendation` or `recommendedNextAction`
+
+Autonomous-loop compatible examples:
+
+```json
+{
+  "agentName": "Integration Team",
+  "changedFiles": [
+    "src/main.jsx",
+    "data/logs.json",
+    "dist/assets/index.js"
+  ],
+  "evidenceExcerpt": "Repository dirty after cycle",
+  "recommendedNextAction": "Review source changes and discard log artifacts"
+}
+```
+
+```json
+{
+  "agentName": "Integration Team",
+  "classifications": {
+    "src/main.jsx": "source changes",
+    "data/logs.json": "logs"
+  }
 }
 ```
 

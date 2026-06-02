@@ -80,6 +80,19 @@ function normalizeTaskKey(agent, task) {
   return `${agent || 'unknown'}::${task || 'unknown'}`.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+function firstPresent(...values) {
+  return values.find((value) => value !== undefined && value !== null && value !== '');
+}
+
+function validationError(res, required, received) {
+  return res.status(400).json({
+    ok: false,
+    error: 'missing_required_field',
+    required,
+    received
+  });
+}
+
 function clampText(value, fallback, maxLength) {
   const text = typeof value === 'string' ? value.trim() : '';
   return (text || fallback).slice(0, maxLength);
@@ -356,11 +369,54 @@ function classifyGitPath(filePath) {
 }
 
 function classifyGitChanges(changes) {
-  return changes.map((change) => ({
-    path: change.path,
-    status: change.status || 'modified',
-    classification: classifyGitPath(change.path)
-  }));
+  return changes.map((change) => {
+    const filePath = typeof change === 'string' ? change : firstPresent(change.path, change.file, change.filePath, change.name);
+    return {
+      path: filePath,
+      status: typeof change === 'string' ? 'modified' : change.status || 'modified',
+      classification: typeof change === 'string'
+        ? classifyGitPath(change)
+        : firstPresent(change.classification, change.type, change.category) || classifyGitPath(filePath || '')
+    };
+  });
+}
+
+function normalizeAdaptiveTaskPayload(body) {
+  const agent = firstPresent(body.agent, body.agentName);
+  const task = firstPresent(body.task, body.taskKey, body.taskName);
+  const outcome = firstPresent(body.outcome, body.classification, body.result, body.status);
+  const note = firstPresent(body.note, body.evidence, body.evidenceExcerpt, body.summary, '');
+  const rootCause = firstPresent(body.rootCause, '');
+  const recommendation = firstPresent(body.recommendation, body.recommendedNextAction, '');
+
+  return {
+    agent,
+    task,
+    outcome,
+    note,
+    rootCause,
+    recommendation,
+    linkedDirectiveId: body.linkedDirectiveId,
+    linkedFindingId: body.linkedFindingId
+  };
+}
+
+function normalizeGitFindingsPayload(body) {
+  const agent = firstPresent(body.agent, body.agentName, 'Unknown');
+  const rawChanges = firstPresent(body.changes, body.changedFiles, body.classifications);
+  const note = firstPresent(body.note, body.evidence, body.evidenceExcerpt, body.summary, '');
+  const changes = Array.isArray(rawChanges)
+    ? rawChanges
+    : rawChanges && typeof rawChanges === 'object'
+      ? Object.entries(rawChanges).map(([filePath, classification]) => ({ path: filePath, classification }))
+      : null;
+
+  return {
+    agent,
+    changes,
+    note,
+    recommendation: firstPresent(body.recommendation, body.recommendedNextAction, '')
+  };
 }
 
 function summarizeStatus(agents, currentStatus) {
@@ -423,10 +479,10 @@ app.get('/api/git-findings', async (req, res) => {
 });
 
 app.post('/api/adaptive-task-update', async (req, res) => {
-  const { agent, task, outcome, note, rootCause, linkedDirectiveId, linkedFindingId } = req.body;
+  const { agent, task, outcome, note, rootCause, recommendation, linkedDirectiveId, linkedFindingId } = normalizeAdaptiveTaskPayload(req.body);
 
   if (!agent || !task || !outcome) {
-    return res.status(400).json({ error: 'agent, task, and outcome are required' });
+    return validationError(res, ['agent|agentName', 'task|taskKey|taskName', 'outcome|classification|result|status'], req.body);
   }
 
   const timestamp = nowIso();
@@ -506,6 +562,7 @@ app.post('/api/adaptive-task-update', async (req, res) => {
     outcome,
     note: note || '',
     rootCause: rootCause || '',
+    recommendation: recommendation || '',
     generated
   };
 
@@ -549,10 +606,10 @@ app.get('/api/adaptive-next-task', async (req, res) => {
 });
 
 app.post('/api/git-findings', async (req, res) => {
-  const { agent, changes, note } = req.body;
+  const { agent, changes, note, recommendation } = normalizeGitFindingsPayload(req.body);
 
   if (!Array.isArray(changes)) {
-    return res.status(400).json({ error: 'changes must be an array' });
+    return validationError(res, ['changes|changedFiles|classifications'], req.body);
   }
 
   const timestamp = nowIso();
@@ -562,6 +619,7 @@ app.post('/api/git-findings', async (req, res) => {
     timestamp,
     agent: agent || 'Unknown',
     note: note || '',
+    recommendation: recommendation || '',
     changes: classifiedChanges,
     summary: classifiedChanges.reduce((counts, change) => {
       counts[change.classification] = (counts[change.classification] || 0) + 1;
