@@ -72,6 +72,9 @@ function App() {
   const [agents, setAgents] = useState([]);
   const [logs, setLogs] = useState([]);
   const [currentDirective, setCurrentDirective] = useState(null);
+  const [commandPrompt, setCommandPrompt] = useState('');
+  const [autonomyLevel, setAutonomyLevel] = useState(1);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [directiveForm, setDirectiveForm] = useState({
     title: '',
     priority: 'medium',
@@ -81,6 +84,7 @@ function App() {
     successCriteria: ''
   });
   const [error, setError] = useState('');
+  const [commandMessage, setCommandMessage] = useState('');
   const [directiveMessage, setDirectiveMessage] = useState('');
   const [lastRefresh, setLastRefresh] = useState(null);
 
@@ -147,6 +151,40 @@ function App() {
     }
   }
 
+  async function submitCommand(event) {
+    event.preventDefault();
+    setCommandMessage('');
+
+    if (autonomyLevel === 0) {
+      setCommandMessage('Autonomy Level 0 allows manual directives only. Use Advanced.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${apiBase}/api/command-directive`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          prompt: commandPrompt,
+          autonomyLevel
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Command request failed');
+      }
+
+      const result = await response.json();
+      setCommandPrompt('');
+      setCommandMessage(`Directive generated from ${result.source}.`);
+      await loadData();
+    } catch (submitError) {
+      setCommandMessage('Unable to generate directive.');
+    }
+  }
+
   useEffect(() => {
     loadData();
     const interval = setInterval(loadData, 5000);
@@ -207,6 +245,47 @@ function App() {
           <h2>Team Orders</h2>
           {currentDirective ? <DirectiveBadge value={currentDirective.priority} /> : <DirectiveBadge value="none" />}
         </div>
+        <form className="command-bar" onSubmit={submitCommand}>
+          <label htmlFor="team-principal-command">Team Principal Command</label>
+          <div className="command-input-row">
+            <input
+              id="team-principal-command"
+              value={commandPrompt}
+              onChange={(event) => setCommandPrompt(event.target.value)}
+              placeholder="Achieve first completed lap."
+              disabled={autonomyLevel === 0}
+              required
+            />
+            <button type="submit" disabled={autonomyLevel === 0}>Generate Directive</button>
+          </div>
+          <div className="command-examples">
+            <span>Examples:</span>
+            <button type="button" onClick={() => setCommandPrompt('Achieve first completed lap.')}>Achieve first completed lap.</button>
+            <button type="button" onClick={() => setCommandPrompt('Determine root cause of gate 1 failure.')}>Determine root cause of gate 1 failure.</button>
+            <button type="button" onClick={() => setCommandPrompt('Improve perception reliability.')}>Improve perception reliability.</button>
+          </div>
+          <div className="autonomy-row">
+            <label>
+              <input
+                type="radio"
+                name="autonomy-level"
+                checked={autonomyLevel === 0}
+                onChange={() => setAutonomyLevel(0)}
+              />
+              Level 0: Manual directives only
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="autonomy-level"
+                checked={autonomyLevel === 1}
+                onChange={() => setAutonomyLevel(1)}
+              />
+              Level 1: Prompt-to-directive generation
+            </label>
+          </div>
+          {commandMessage && <span className="form-message">{commandMessage}</span>}
+        </form>
         {currentDirective ? (
           <div className="directive-card">
             <div className="directive-meta">
@@ -229,6 +308,10 @@ function App() {
         ) : (
           <p className="muted-text">No active directive.</p>
         )}
+        <button className="advanced-toggle" type="button" onClick={() => setShowAdvanced((current) => !current)}>
+          {showAdvanced ? 'Hide Advanced' : 'Advanced'}
+        </button>
+        {showAdvanced && (
         <form className="directive-form" onSubmit={submitDirective}>
           <input
             value={directiveForm.title}
@@ -280,6 +363,7 @@ function App() {
           <button type="submit">Issue Directive</button>
           {directiveMessage && <span className="form-message">{directiveMessage}</span>}
         </form>
+        )}
       </section>
 
       <section>

@@ -72,6 +72,132 @@ function createReportId(type) {
   return `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function clampText(value, fallback, maxLength) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return (text || fallback).slice(0, maxLength);
+}
+
+function inferScope(prompt) {
+  const normalizedPrompt = prompt.toLowerCase();
+  if (normalizedPrompt.includes('perception') || normalizedPrompt.includes('gate') || normalizedPrompt.includes('camera')) {
+    return 'perception';
+  }
+  if (normalizedPrompt.includes('test') || normalizedPrompt.includes('failure') || normalizedPrompt.includes('root cause')) {
+    return 'testing';
+  }
+  if (normalizedPrompt.includes('control') || normalizedPrompt.includes('lap') || normalizedPrompt.includes('steer')) {
+    return 'controls';
+  }
+  if (normalizedPrompt.includes('navigation') || normalizedPrompt.includes('route')) {
+    return 'navigation';
+  }
+  if (normalizedPrompt.includes('integration') || normalizedPrompt.includes('pipeline')) {
+    return 'integration';
+  }
+  if (normalizedPrompt.includes('quality') || normalizedPrompt.includes('qa')) {
+    return 'qa';
+  }
+  return 'all';
+}
+
+function inferPriority(prompt) {
+  const normalizedPrompt = prompt.toLowerCase();
+  if (normalizedPrompt.includes('critical') || normalizedPrompt.includes('blocked') || normalizedPrompt.includes('failure')) {
+    return 'critical';
+  }
+  if (normalizedPrompt.includes('root cause') || normalizedPrompt.includes('first completed lap') || normalizedPrompt.includes('reliability')) {
+    return 'high';
+  }
+  return 'medium';
+}
+
+function fallbackDirectiveFromPrompt(prompt) {
+  const normalizedPrompt = prompt.trim().replace(/\s+/g, ' ');
+  const title = normalizedPrompt.length > 72 ? `${normalizedPrompt.slice(0, 69)}...` : normalizedPrompt;
+  const scope = inferScope(normalizedPrompt);
+  const priority = inferPriority(normalizedPrompt);
+
+  return {
+    title: clampText(title, 'Team Principal Command', 90),
+    priority,
+    scope,
+    objective: clampText(normalizedPrompt, 'Execute Team Principal command.', 500),
+    instructions: `Translate this command into immediate engineering action: ${normalizedPrompt}. Identify owner, current blocker, next experiment, and report progress through Mission Control.`,
+    successCriteria: `The team can clearly report whether this command is complete, blocked, or needs a Team Principal decision: ${normalizedPrompt}.`
+  };
+}
+
+function normalizeGeneratedDirective(generated, prompt) {
+  const fallback = fallbackDirectiveFromPrompt(prompt);
+  const priority = validDirectivePriorities.includes(generated?.priority) ? generated.priority : fallback.priority;
+  const scope = validDirectiveScopes.includes(generated?.scope) ? generated.scope : fallback.scope;
+
+  return {
+    title: clampText(generated?.title, fallback.title, 90),
+    priority,
+    scope,
+    objective: clampText(generated?.objective, fallback.objective, 500),
+    instructions: clampText(generated?.instructions, fallback.instructions, 1400),
+    successCriteria: clampText(generated?.successCriteria, fallback.successCriteria, 700)
+  };
+}
+
+async function generateDirectiveFromLlm(prompt) {
+  if (!process.env.OPENAI_API_KEY) {
+    return {
+      source: 'fallback',
+      directive: fallbackDirectiveFromPrompt(prompt)
+    };
+  }
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      temperature: 0.2,
+      messages: [
+        {
+          role: 'system',
+          content: 'Convert a Team Principal command into a JSON directive. Return only valid JSON with keys title, priority, scope, objective, instructions, successCriteria. priority must be low, medium, high, or critical. scope must be all, controls, perception, testing, qa, navigation, or integration.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    return {
+      source: 'fallback',
+      directive: fallbackDirectiveFromPrompt(prompt)
+    };
+  }
+
+  const payload = await response.json();
+  const content = payload.choices?.[0]?.message?.content || '{}';
+  let parsed = {};
+
+  try {
+    parsed = JSON.parse(content);
+  } catch (error) {
+    return {
+      source: 'fallback',
+      directive: fallbackDirectiveFromPrompt(prompt)
+    };
+  }
+
+  return {
+    source: 'llm',
+    directive: normalizeGeneratedDirective(parsed, prompt)
+  };
+}
+
 function newestFirst(items) {
   return [...items].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 }
@@ -255,6 +381,45 @@ app.post('/api/directive', async (req, res) => {
   await writeJson(files.logs, logs);
 
   res.status(201).json({ ok: true, directive, log: logEntry });
+});
+
+app.post('/api/command-directive', async (req, res) => {
+  const { prompt, autonomyLevel } = req.body;
+
+  if (!prompt || typeof prompt !== 'string') {
+    return res.status(400).json({ error: 'prompt is required' });
+  }
+
+  if (autonomyLevel !== 1) {
+    return res.status(400).json({ error: 'autonomyLevel must be 1 for prompt-to-directive generation' });
+  }
+
+  const generated = await generateDirectiveFromLlm(prompt);
+  const timestamp = nowIso();
+  const directive = {
+    id: createDirectiveId(),
+    timestamp,
+    issuedBy: 'Team Principal',
+    ...generated.directive,
+    status: 'active'
+  };
+  const directives = await readJson(files.directives, []);
+  const logs = await readJson(files.logs, []);
+  const logEntry = {
+    type: 'command-directive-created',
+    timestamp,
+    source: generated.source,
+    prompt,
+    directive
+  };
+
+  directives.push(directive);
+  logs.push(logEntry);
+
+  await writeJson(files.directives, directives);
+  await writeJson(files.logs, logs);
+
+  res.status(201).json({ ok: true, source: generated.source, directive, log: logEntry });
 });
 
 app.patch('/api/directive/:id', async (req, res) => {

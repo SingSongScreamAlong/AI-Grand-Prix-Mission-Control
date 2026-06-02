@@ -269,6 +269,68 @@ h2 {
   gap: 10px;
 }
 
+.command-bar {
+  border: 1px solid rgba(94, 234, 212, 0.22);
+  border-radius: 20px;
+  background: rgba(8, 47, 73, 0.28);
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 16px;
+}
+
+.command-bar > label {
+  color: #d8e5f7;
+  font-weight: 900;
+}
+
+.command-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.command-examples,
+.autonomy-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.command-examples span {
+  color: #93a4bb;
+}
+
+.command-examples button,
+.advanced-toggle {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #d8e5f7;
+  cursor: pointer;
+  font: inherit;
+  padding: 8px 12px;
+}
+
+.autonomy-row label {
+  color: #a8b6cc;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.advanced-toggle {
+  margin-bottom: 12px;
+}
+
+.command-input-row button:disabled,
+.command-input-row input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.command-input-row input,
 .directive-form input,
 .directive-form select,
 .directive-form textarea {
@@ -285,6 +347,7 @@ h2 {
   resize: vertical;
 }
 
+.command-input-row button,
 .directive-form button {
   border: 0;
   border-radius: 12px;
@@ -366,6 +429,7 @@ h2 {
   .executive-grid,
   .executive-columns,
   .agent-grid,
+  .command-input-row,
   .form-row {
     grid-template-columns: 1fr;
   }

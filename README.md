@@ -110,6 +110,26 @@ Creates a Team Principal directive.
 
 Updates directive status.
 
+### POST `/api/command-directive`
+
+Converts a Team Principal free-text command into a directive and creates it automatically.
+
+Required JSON body:
+
+```json
+{
+  "prompt": "Achieve first completed lap.",
+  "autonomyLevel": 1
+}
+```
+
+Autonomy levels:
+
+- `0`: manual directives only
+- `1`: prompt-to-directive generation
+
+If `OPENAI_API_KEY` is configured, Mission Control uses the LLM helper. If it is not configured, it uses a deterministic local fallback so the command bar still works.
+
 ### POST `/api/agent-update`
 
 Updates one agent and appends an entry to `data/logs.json`.
